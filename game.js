@@ -5,17 +5,17 @@
   const CANVAS_W = 720;
   const CANVAS_H = 1280;
 
-  // Your REAL source sprite size (per-frame PNG size)
+  // Your real per-frame runner size
   const PLAYER_SRC_W = 35;
   const PLAYER_SRC_H = 53;
 
-  // Scale up for phone readability (35x53 * 4 = 140x212)
-  const PLAYER_SCALE = 4;
-  const PLAYER_DRAW_W = PLAYER_SRC_W * PLAYER_SCALE; // 140
-  const PLAYER_DRAW_H = PLAYER_SRC_H * PLAYER_SCALE; // 212
+  // Scale up for phone readability
+  const PLAYER_SCALE = 4;                 // 35x53 -> 140x212
+  const PLAYER_DRAW_W = PLAYER_SRC_W * PLAYER_SCALE;
+  const PLAYER_DRAW_H = PLAYER_SRC_H * PLAYER_SCALE;
 
-  // Ground position (feet line)
-  const GROUND_Y = 1020; // tweak 980–1040 if you want
+  // Ground (feet line)
+  const GROUND_Y = 1020;                  // tweak 980–1040
 
   // Physics
   const GRAVITY = 3400;
@@ -29,20 +29,22 @@
   // Lanes
   const LANES = 3;
   const LANE_CENTER_X = CANVAS_W * 0.5;
-  const LANE_GAP = 175;        // tweak 155–190 based on your road look
-  const LANE_SNAP = 20;        // snappiness of lane switching
+  const LANE_GAP = 175;                   // tweak 155–190
+  const LANE_SNAP = 20;
 
   // Spawning
   const SPAWN_MIN = 0.70;
   const SPAWN_MAX = 1.10;
-
-  // Overhead obstacle chance
   const OVERHEAD_CHANCE = 0.38;
 
   // Road drawing
   const ROAD_TILE_DRAW_W = 256;
   const ROAD_STRIP_Y = GROUND_Y - 90;
   const ROAD_STRIP_H = CANVAS_H - ROAD_STRIP_Y;
+
+  // Lives / damage
+  const MAX_LIVES = 3;
+  const HIT_IFRAME = 0.85; // seconds of invincibility after a hit
 
   // =========================
   // CANVAS
@@ -116,7 +118,7 @@
           images[key] = await loadImage(value);
           if (key === "ob_lowbar") hasLowBar = true;
         } catch (e) {
-          if (key === "ob_lowbar") hasLowBar = false;
+          if (key === "ob_lowbar") hasLowBar = false; // optional
           else throw e;
         }
       }
@@ -127,13 +129,15 @@
   // INPUT (touch + swipe + keyboard)
   // =========================
   const input = {
-    jump: false,
-    slide: false,
-    tapped: false,
-    tapX: 0,
-    tapY: 0,
+    jumpHeld: false,
+    slideHeld: false,
+
+    justReleased: false,
+    releaseX: 0,
+    releaseY: 0,
+
     swipeLeft: false,
-    swipeRight: false
+    swipeRight: false,
   };
 
   function pointerPosFromClient(clientX, clientY) {
@@ -157,15 +161,11 @@
     return pointerPos(e);
   }
 
-  let jumpBtnRect = { x: 0, y: 0, w: 0, h: 0 };
-  let slideBtnRect = { x: 0, y: 0, w: 0, h: 0 };
-  let startBtnRect = { x: 0, y: 0, w: 0, h: 0 };
-
   function inRect(p, r) {
     return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
   }
 
-  // swipe detection
+  // Swipe detection
   let touchStart = null;
   const SWIPE_MIN = 55;
   const SWIPE_MAX_Y = 65;
@@ -174,16 +174,13 @@
     e.preventDefault();
     const p = pointerPos(e);
 
-    input.tapped = true;
-    input.tapX = p.x;
-    input.tapY = p.y;
-
-    if (state === STATE.PLAY) {
-      input.jump = inRect(p, jumpBtnRect);
-      input.slide = inRect(p, slideBtnRect);
+    // held buttons (only matter during PLAY)
+    if (state === STATE.PLAY && !paused) {
+      input.jumpHeld = inRect(p, jumpBtnRect);
+      input.slideHeld = inRect(p, slideBtnRect);
     }
 
-    const onButton = (state === STATE.PLAY) && (input.jump || input.slide);
+    const onButton = (state === STATE.PLAY && !paused) && (input.jumpHeld || input.slideHeld);
     touchStart = { x: p.x, y: p.y, onButton };
   }
 
@@ -191,7 +188,13 @@
     e.preventDefault();
     const p = pointerPosEnd(e);
 
-    if (touchStart && !touchStart.onButton && state === STATE.PLAY) {
+    // register a single "click/tap" for UI screens
+    input.justReleased = true;
+    input.releaseX = p.x;
+    input.releaseY = p.y;
+
+    // swipe (lane change) only during PLAY and not paused
+    if (touchStart && !touchStart.onButton && state === STATE.PLAY && !paused) {
       const dx = p.x - touchStart.x;
       const dy = p.y - touchStart.y;
       if (Math.abs(dx) >= SWIPE_MIN && Math.abs(dy) <= SWIPE_MAX_Y) {
@@ -200,8 +203,8 @@
       }
     }
 
-    input.jump = false;
-    input.slide = false;
+    input.jumpHeld = false;
+    input.slideHeld = false;
     touchStart = null;
   }
 
@@ -211,15 +214,15 @@
   window.addEventListener("mouseup", onUp);
 
   window.addEventListener("keydown", (e) => {
-    if (e.code === "Space" || e.code === "ArrowUp") input.jump = true;
-    if (e.code === "ArrowDown") input.slide = true;
+    if (e.code === "Space" || e.code === "ArrowUp") input.jumpHeld = true;
+    if (e.code === "ArrowDown") input.slideHeld = true;
     if (e.code === "ArrowLeft") input.swipeLeft = true;
     if (e.code === "ArrowRight") input.swipeRight = true;
-    if (e.code === "Enter") input.tapped = true;
+    if (e.code === "KeyP") togglePause();
   });
   window.addEventListener("keyup", (e) => {
-    if (e.code === "Space" || e.code === "ArrowUp") input.jump = false;
-    if (e.code === "ArrowDown") input.slide = false;
+    if (e.code === "Space" || e.code === "ArrowUp") input.jumpHeld = false;
+    if (e.code === "ArrowDown") input.slideHeld = false;
   });
 
   // =========================
@@ -228,16 +231,71 @@
   const STATE = { LOADING: "loading", START: "start", PLAY: "play", GAMEOVER: "gameover" };
   let state = STATE.LOADING;
 
+  let paused = false;
+
   let speed = START_SPEED;
   let score = 0;
   let roadOffset = 0;
+
+  let lives = MAX_LIVES;
+  let iFrameT = 0; // invulnerability timer
+
+  // =========================
+  // UI RECTS
+  // =========================
+  let jumpBtnRect = { x: 0, y: 0, w: 0, h: 0 };
+  let slideBtnRect = { x: 0, y: 0, w: 0, h: 0 };
+
+  // Start button hit area (must tap this to start)
+  let startBtnRect = { x: 0, y: 0, w: 0, h: 0 };
+
+  // Game over home button hit area (tap to go title)
+  let homeBtnRect = { x: 0, y: 0, w: 0, h: 0 };
+
+  // Pause button rect (top-right)
+  let pauseBtnRect = { x: 0, y: 0, w: 0, h: 0 };
+
+  function layoutButtons() {
+    // your image buttons roughly ~255x110
+    const w = 255;
+    const h = 110;
+    const pad = 28;
+    const bottom = CANVAS_H - pad - h;
+
+    slideBtnRect = { x: pad, y: bottom, w, h };
+    jumpBtnRect  = { x: CANVAS_W - pad - w, y: bottom, w, h };
+
+    // pause button: small square top-right
+    pauseBtnRect = { x: CANVAS_W - 28 - 72, y: 24, w: 72, h: 72 };
+  }
+
+  function layoutStartButton() {
+    // IMPORTANT: this is why your start was triggering anywhere.
+    // Make this smaller and positioned where the START graphic is in start.png.
+    // If it still doesn't line up, adjust y and maybe w/h.
+    const w = 360;
+    const h = 150;
+    const x = (CANVAS_W - w) / 2;
+    const y = 900; // tweak to match your art
+    startBtnRect = { x, y, w, h };
+  }
+
+  function layoutGameOverButtons() {
+    // Home button hit area (wherever the "home" icon is on your game_over.png)
+    // Default: bottom-left region.
+    const w = 220;
+    const h = 120;
+    const x = 40;
+    const y = 1040; // tweak to match your art
+    homeBtnRect = { x, y, w, h };
+  }
 
   // =========================
   // Player (3 lanes)
   // =========================
   function laneToX(lane) {
-    const start = LANE_CENTER_X - LANE_GAP; // lane 0 center
-    const laneCenter = start + lane * LANE_GAP;
+    const startCenter = LANE_CENTER_X - LANE_GAP; // lane 0 center
+    const laneCenter = startCenter + lane * LANE_GAP;
     return laneCenter - PLAYER_DRAW_W * 0.5;
   }
 
@@ -247,7 +305,7 @@
     y: GROUND_Y,
     vy: 0,
     onGround: true,
-    mode: "run",
+    mode: "run",  // run/jump/slide
     animT: 0,
     slideT: 0
   };
@@ -271,27 +329,14 @@
       const type = hasLowBar ? "lowbar" : "cone";
       const img = images[`ob_${type}`];
 
-      // low_bar source ~128x56 => aspect ~2.285
-      // draw it wide so it reads as “slide under”
+      // low_bar is ~128x56; draw it wide to read as "slide under"
       const drawW = 260;
-      const drawH = Math.round(drawW / 2.285); // ~114
+      const drawH = 114;
 
       const x = laneToX(lane) + (PLAYER_DRAW_W - drawW) / 2;
+      const y = GROUND_Y - (PLAYER_DRAW_H * 0.78); // tweak 0.72–0.85
 
-      // Position it so standing collides, sliding clears
-      // This is the top-left y:
-      const y = GROUND_Y - (PLAYER_DRAW_H * 0.78); // tweak 0.72–0.85 if needed
-
-      obstacles.push({
-        kind: "overhead",
-        type,
-        img,
-        lane,
-        x,
-        y,
-        w: drawW,
-        h: drawH
-      });
+      obstacles.push({ kind: "overhead", type, img, lane, x, y, w: drawW, h: drawH });
       return;
     }
 
@@ -300,40 +345,10 @@
 
     const drawW = 140 + Math.random() * 20;
     const drawH = 140 + Math.random() * 20;
+
     const x = laneToX(lane) + (PLAYER_DRAW_W - drawW) / 2;
 
-    obstacles.push({
-      kind: "ground",
-      type,
-      img,
-      lane,
-      x,
-      y: GROUND_Y - drawH,
-      w: drawW,
-      h: drawH
-    });
-  }
-
-  // =========================
-  // UI RECTS
-  // =========================
-  function layoutButtons() {
-    const w = 255;
-    const h = 110;
-    const pad = 28;
-    const bottom = CANVAS_H - pad - h;
-
-    slideBtnRect = { x: pad, y: bottom, w, h };
-    jumpBtnRect  = { x: CANVAS_W - pad - w, y: bottom, w, h };
-  }
-
-  function layoutStartButton() {
-    // hit area over your start.png’s start button
-    const w = 360;
-    const h = 140;
-    const x = (CANVAS_W - w) / 2;
-    const y = 900; // adjust if your start button graphic is elsewhere
-    startBtnRect = { x, y, w, h };
+    obstacles.push({ kind: "ground", type, img, lane, x, y: GROUND_Y - drawH, w: drawW, h: drawH });
   }
 
   // =========================
@@ -354,7 +369,7 @@
   }
 
   // =========================
-  // HITBOXES (tuned for 35x53 scaled)
+  // HITBOXES / COLLISION
   // =========================
   function playerHitbox() {
     const w = PLAYER_DRAW_W * 0.55;
@@ -366,14 +381,14 @@
 
   function obstacleHitbox(ob) {
     if (ob.kind === "overhead") {
-      // bottom band of overhead bar
+      // bottom band of the low bar
       const w = ob.w * 0.90;
       const h = ob.h * 0.45;
       const x = ob.x + (ob.w - w) / 2;
       const y = ob.y + ob.h * 0.55;
       return { x, y, w, h };
     }
-
+    // ground obstacle
     const w = ob.w * 0.75;
     const h = ob.h * 0.75;
     const x = ob.x + (ob.w - w) / 2;
@@ -386,12 +401,28 @@
   }
 
   // =========================
+  // PAUSE
+  // =========================
+  function togglePause() {
+    if (state !== STATE.PLAY) return;
+    paused = !paused;
+    // clear held buttons so it doesn't “auto jump” when resuming
+    input.jumpHeld = false;
+    input.slideHeld = false;
+  }
+
+  // =========================
   // RESET
   // =========================
   function resetGame() {
+    paused = false;
+
     speed = START_SPEED;
     score = 0;
     roadOffset = 0;
+
+    lives = MAX_LIVES;
+    iFrameT = 0;
 
     player.lane = 1;
     player.x = laneToX(1);
@@ -408,7 +439,7 @@
 
     input.swipeLeft = false;
     input.swipeRight = false;
-    input.tapped = false;
+    input.justReleased = false;
   }
 
   // =========================
@@ -430,13 +461,13 @@
 
   function drawPlayer() {
     const img = getAnimFrame(player.mode, player.animT);
-    ctx.drawImage(
-      img,
-      Math.round(player.x),
-      Math.round(player.y - PLAYER_DRAW_H),
-      PLAYER_DRAW_W,
-      PLAYER_DRAW_H
-    );
+
+    // brief “blink” while invincible
+    const blinking = iFrameT > 0 && Math.floor(iFrameT * 14) % 2 === 0;
+    if (blinking) ctx.globalAlpha = 0.55;
+
+    ctx.drawImage(img, Math.round(player.x), Math.round(player.y - PLAYER_DRAW_H), PLAYER_DRAW_W, PLAYER_DRAW_H);
+    ctx.globalAlpha = 1;
   }
 
   function drawObstacles() {
@@ -445,31 +476,106 @@
     }
   }
 
-  function drawUI() {
-    ctx.drawImage(images.slideBtn, slideBtnRect.x, slideBtnRect.y, slideBtnRect.w, slideBtnRect.h);
-    ctx.drawImage(images.jumpBtn,  jumpBtnRect.x,  jumpBtnRect.y,  jumpBtnRect.w,  jumpBtnRect.h);
+  function drawPauseButton() {
+    // Draw a simple pause icon (no asset needed)
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(pauseBtnRect.x, pauseBtnRect.y, pauseBtnRect.w, pauseBtnRect.h);
 
-    ctx.font = "48px system-ui";
+    ctx.fillStyle = "white";
+    const pad = 18;
+    const barW = 10;
+    const barH = pauseBtnRect.h - pad * 2;
+    ctx.fillRect(pauseBtnRect.x + pad, pauseBtnRect.y + pad, barW, barH);
+    ctx.fillRect(pauseBtnRect.x + pauseBtnRect.w - pad - barW, pauseBtnRect.y + pad, barW, barH);
+  }
+
+  function drawHUD() {
+    // SCORE (top-left)
+    ctx.font = "44px system-ui";
     ctx.fillStyle = "white";
     ctx.strokeStyle = "black";
     ctx.lineWidth = 6;
-    const txt = `${Math.floor(score)}`;
-    ctx.strokeText(txt, 28, 70);
-    ctx.fillText(txt, 28, 70);
+
+    const s = `Score ${Math.floor(score)}`;
+    ctx.strokeText(s, 24, 62);
+    ctx.fillText(s, 24, 62);
+
+    // LIFE BAR (top-center)
+    const barW = 260;
+    const barH = 22;
+    const x = (CANVAS_W - barW) / 2;
+    const y = 30;
+
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(x - 6, y - 6, barW + 12, barH + 12);
+
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.fillRect(x, y, barW, barH);
+
+    const pct = Math.max(0, lives / MAX_LIVES);
+    ctx.fillStyle = "rgba(255,80,80,0.95)";
+    ctx.fillRect(x, y, Math.floor(barW * pct), barH);
+
+    // Lives text
+    ctx.font = "22px system-ui";
+    ctx.fillStyle = "white";
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 4;
+    const lt = `${lives}/${MAX_LIVES}`;
+    ctx.strokeText(lt, x + barW + 14, y + 18);
+    ctx.fillText(lt, x + barW + 14, y + 18);
+
+    // Pause icon
+    drawPauseButton();
+  }
+
+  function drawUIButtons() {
+    ctx.drawImage(images.slideBtn, slideBtnRect.x, slideBtnRect.y, slideBtnRect.w, slideBtnRect.h);
+    ctx.drawImage(images.jumpBtn,  jumpBtnRect.x,  jumpBtnRect.y,  jumpBtnRect.w,  jumpBtnRect.h);
+  }
+
+  function drawPausedOverlay() {
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.fillStyle = "white";
+    ctx.font = "72px system-ui";
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 10;
+    const t = "PAUSED";
+    const w = ctx.measureText(t).width;
+    ctx.strokeText(t, (CANVAS_W - w)/2, 520);
+    ctx.fillText(t, (CANVAS_W - w)/2, 520);
+
+    ctx.font = "28px system-ui";
+    const t2 = "Tap pause to resume";
+    const w2 = ctx.measureText(t2).width;
+    ctx.strokeText(t2, (CANVAS_W - w2)/2, 580);
+    ctx.fillText(t2, (CANVAS_W - w2)/2, 580);
   }
 
   function drawStartScreen() {
     ctx.drawImage(images.start, 0, 0, CANVAS_W, CANVAS_H);
+    // Debug outline (uncomment if you need to line up start tap area)
+    // ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    // ctx.lineWidth = 5;
+    // ctx.strokeRect(startBtnRect.x, startBtnRect.y, startBtnRect.w, startBtnRect.h);
   }
 
   function drawGameOverScreen() {
     ctx.drawImage(images.gameOver, 0, 0, CANVAS_W, CANVAS_H);
+    // Debug outline (uncomment if you need to line up home area)
+    // ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    // ctx.lineWidth = 5;
+    // ctx.strokeRect(homeBtnRect.x, homeBtnRect.y, homeBtnRect.w, homeBtnRect.h);
   }
 
   // =========================
   // UPDATE (PLAY)
   // =========================
   function updatePlay(dt) {
+    // invincibility timer
+    if (iFrameT > 0) iFrameT = Math.max(0, iFrameT - dt);
+
     speed += SPEED_RAMP * dt;
     score += speed * dt * 0.02;
 
@@ -483,12 +589,12 @@
       input.swipeRight = false;
     }
 
-    // smooth move to lane
+    // smooth lane snap
     const targetX = laneToX(player.lane);
     player.x += (targetX - player.x) * Math.min(1, LANE_SNAP * dt);
 
     // jump
-    if (input.jump && player.onGround && player.mode !== "slide") {
+    if (input.jumpHeld && player.onGround && player.mode !== "slide") {
       player.vy = JUMP_VELOCITY;
       player.onGround = false;
       player.mode = "jump";
@@ -496,7 +602,7 @@
     }
 
     // slide
-    if (input.slide && player.onGround && player.mode !== "slide") {
+    if (input.slideHeld && player.onGround && player.mode !== "slide") {
       player.mode = "slide";
       player.slideT = SLIDE_DURATION;
       player.animT = 0;
@@ -517,19 +623,15 @@
     if (player.y >= GROUND_Y) {
       player.y = GROUND_Y;
       player.vy = 0;
-      if (!player.onGround) {
-        player.onGround = true;
-        if (player.mode === "jump") {
-          player.mode = "run";
-          player.animT = 0;
-        }
-      }
       player.onGround = true;
+      if (player.mode === "jump") {
+        player.mode = "run";
+        player.animT = 0;
+      }
     } else {
       player.onGround = false;
     }
 
-    // animate
     player.animT += dt;
 
     // spawn obstacles
@@ -546,13 +648,23 @@
     // remove offscreen
     while (obstacles.length && obstacles[0].x < -450) obstacles.shift();
 
-    // collision
-    const pbox = playerHitbox();
-    for (const ob of obstacles) {
-      const obox = obstacleHitbox(ob);
-      if (intersects(pbox, obox)) {
-        state = STATE.GAMEOVER;
-        break;
+    // collisions -> damage system (3 hits)
+    if (iFrameT <= 0) {
+      const pbox = playerHitbox();
+      for (const ob of obstacles) {
+        const obox = obstacleHitbox(ob);
+        if (intersects(pbox, obox)) {
+          lives -= 1;
+          iFrameT = HIT_IFRAME;
+
+          // optional: remove the obstacle you hit so it doesn't instantly hit again
+          ob.x = -9999;
+
+          if (lives <= 0) {
+            state = STATE.GAMEOVER;
+          }
+          break;
+        }
       }
     }
   }
@@ -568,41 +680,70 @@
 
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
+    // handle UI "clicks"
+    const click = input.justReleased ? { x: input.releaseX, y: input.releaseY } : null;
+    input.justReleased = false;
+
     if (state === STATE.LOADING) {
       ctx.fillStyle = "white";
       ctx.font = "40px system-ui";
       ctx.fillText("Loading...", 40, 80);
+    }
 
-    } else if (state === STATE.START) {
-      drawStartScreen();
+    if (state === STATE.START) {
       layoutStartButton();
+      drawStartScreen();
 
-      if (input.tapped) {
-        const p = { x: input.tapX, y: input.tapY };
-        input.tapped = false;
-
-        if (inRect(p, startBtnRect)) {
-          resetGame();
-          state = STATE.PLAY;
-        }
-      }
-
-    } else if (state === STATE.PLAY) {
-      drawBackground();
-      drawRoad(dt);
-      updatePlay(dt);
-      drawObstacles();
-      drawPlayer();
-      layoutButtons();
-      drawUI();
-
-    } else if (state === STATE.GAMEOVER) {
-      drawGameOverScreen();
-      if (input.tapped) {
-        input.tapped = false;
+      // ONLY start if you tapped the Start button area
+      if (click && inRect(click, startBtnRect)) {
         resetGame();
         state = STATE.PLAY;
       }
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    if (state === STATE.PLAY) {
+      layoutButtons();
+
+      // Pause button click
+      if (click && inRect(click, pauseBtnRect)) {
+        togglePause();
+      }
+
+      drawBackground();
+      drawRoad(paused ? 0 : dt);
+
+      if (!paused) {
+        updatePlay(dt);
+      }
+
+      drawObstacles();
+      drawPlayer();
+      drawHUD();
+      drawUIButtons();
+
+      if (paused) drawPausedOverlay();
+
+      requestAnimationFrame(loop);
+      return;
+    }
+
+    if (state === STATE.GAMEOVER) {
+      layoutGameOverButtons();
+      drawGameOverScreen();
+
+      // Tap HOME -> back to title
+      if (click && inRect(click, homeBtnRect)) {
+        state = STATE.START;
+      } else if (click) {
+        // Tap anywhere else -> retry (optional behavior)
+        resetGame();
+        state = STATE.PLAY;
+      }
+
+      requestAnimationFrame(loop);
+      return;
     }
 
     requestAnimationFrame(loop);
@@ -613,6 +754,7 @@
   // =========================
   layoutButtons();
   layoutStartButton();
+  layoutGameOverButtons();
 
   loadAll()
     .then(() => {
