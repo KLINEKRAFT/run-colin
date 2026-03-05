@@ -1,49 +1,44 @@
-/* 1. Prevent the whole page from bouncing or scrolling */
+/* Prevent the whole page from moving/bouncing */
 html, body {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-  background: #0b0c10; /* Match your game background */
+  background: #0b0c10;
   overflow: hidden;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  touch-action: none; /* Stops the "pull-to-refresh" gesture */
 }
 
-/* 2. The Wrapper (Safe Area aware) */
 #wrap {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Handles iPhone notch padding automatically */
+  /* Accounts for the notch/home bar on modern iPhones */
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* 3. The Canvas Fix */
 canvas {
-  /* Enforce the 720x1280 ratio */
+  /* Forces the vertical runner ratio */
   aspect-ratio: 720 / 1280;
   
-  /* Make it as large as possible without overflowing */
-  max-width: 100%;
-  max-height: 100%;
+  /* Fits the screen while maintaining shape */
+  max-width: 100vw;
+  max-height: 100vh;
   width: auto;
   height: auto;
-  
-  /* Sharp pixel art rendering */
+
+  /* Keeps your pixel art crisp and not blurry */
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   
-  /* Critical for mobile: Stop browser gestures like 'swipe to go back' */
-  touch-action: none; 
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  
   background: #000;
   display: block;
+  
+  /* Stops mobile callouts (like "Copy Image") when holding buttons */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
